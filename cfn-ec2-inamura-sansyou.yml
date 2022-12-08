@@ -1,0 +1,114 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Create EC2'
+
+#-------------------------------------------------------------------------#
+# ???????
+#-------------------------------------------------------------------------#
+Metadata:
+  aws::Cloudformatoin::Interface:
+    ParameterGroups:
+      -
+        Paramaters:
+          - ImageID
+          - EC2KeyPair
+          - BaseNetworkStackName
+          - privateIP
+
+Parameters:
+  ImageID:
+    Description: Please type the EC2 image ID.
+    Type: String 
+    Default: ami-0bccc42bba4dedac1 #Red Hat Enterprise Linux 8 (HVM), SSD Volume Type 
+  EC2KeyPair:
+    Description: Please Select EC2 key name.
+    Type: AWS::EC2::KeyPair::KeyName
+  BaseNetworkStackName:
+    Description: Please type the SharedServices stack name.
+    Type: String 
+    Default: che-vpc
+  privateIP:
+    Type: String 
+    Default: "10.0.0.0"
+
+#-------------------------------------------------------------------------#
+# ??????
+#-------------------------------------------------------------------------#
+Resources:
+  
+  MyEC2:
+    Type: AWS::EC2::Instance
+    Properties:
+      AvailabilityZone: ap-northeast-1a
+      ImageId: !Sub ${ImageID}
+      InstanceType: "t2.micro"
+      KeyName: !Sub ${EC2KeyPair}
+      IamInstanceProfile: rul-admin-che
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: "0"
+          SubnetId: {"Fn::ImportValue": !Sub "${BaseNetworkStackName}-public-subnet-a"}
+          GroupSet:
+           #- {"Fn::ImportValue": !Sub ["Ref":"BaseNetworkStackName","sg"]}
+           - {"Fn::ImportValue": !Sub "${BaseNetworkStackName}-sg"}
+          PrivateIpAddress: !Sub ${privateIP}
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: 'true'
+            VolumeType: "gp3"
+            VolumeSize: 30
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          cd /home/ec2-user/
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          sudo yum -y install unzip
+          unzip awscliv2.zip
+          sudo ./aws/install
+          rm -rf aws
+          rm -f awscliv2.zip
+
+          sudo su -
+          # ??????
+          useradd cheyj55
+          # ????????
+          echo "Cheyj3116" | sudo passwd --stdin cheyj55
+          echo "Cheyj3116" | sudo passwd --stdin root
+          # sudo???
+          sed -i -e '$ a cheyj55 ALL=(ALL)    NOPASSWD:ALL' /etc/sudoers
+          # ssh???????????????
+          sed -i -e 's/PasswordAuthentication no/PasswordAuthentication yes/g' /etc/ssh/sshd_config
+          # sshd???????????
+          sudo systemctl restart sshd
+
+          # proxy?????
+          # sudo yum install -y squid
+          export f_config=/etc/squid/squid.conf
+          export ln=`sed -n '/INSERT YOUR OWN RULE(S) HERE TO ALLOW ACCESS FROM YOUR CLIENTS/=' $f_config`
+          sed '${$ln +2}i acl localnet src /etc/squid/localnetlist' $f_config 
+
+
+      Tags:
+        - Key: Name
+          Value:  {"Fn::Join":["",[{"Fn::ImportValue": {"Fn::Sub":"${BaseNetworkStackName}-tagkey"}},"-ec2-public01"]]}
+  # NewVolume:
+  #   Type: AWS::EC2::Volume
+  #   Properties:
+  #     #AutoEnableIO: false
+  #     AvailabilityZone: "ap-northeast-1a" 
+  #     #AvailabilityZone: !GetAtt MyEC2.AvailabilityZone # Required
+  #     #Encrypted: false
+  #     #Iops: 15000
+  #     #Throughput: 500
+  #     #KmsKeyId: "String"
+  #     VolumeType: "gp3"
+  #     Size: 5
+  #     Tags:
+  #       - Key: Name
+  #         Value:  {"Fn::Join":["",[{"Fn::ImportValue": {"Fn::Sub":"${BaseNetworkStackName}-tagkey"}},"-ec2-EBS01"]]} 
+  # MountPoint:
+  #   Type: AWS::EC2::VolumeAttachment
+  #   Properties:
+  #     InstanceId: !Ref MyEC2
+  #     VolumeId: !Ref NewVolume
+  #     Device: /dev/sdf
